@@ -2,7 +2,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const fetch = require("node-fetch");
 const cors = require("cors");
-
+const pushTokens = new Set();
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -44,6 +44,21 @@ app.post("/notify", async (req, res) => {
 });
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok", message: "Backend is alive!" });
+});
+app.post("/register-token", (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "No token provided" });
+  }
+
+  pushTokens.add(token);
+  console.log("Registered token:", token);
+
+  res.json({
+    success: true,
+    totalTokens: pushTokens.size,
+  });
 });
 
 // Subscriber count endpoint

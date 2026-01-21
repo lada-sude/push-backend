@@ -42,6 +42,9 @@ app.post("/notify", async (req, res) => {
 
   res.send({ success: true, results });
 });
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", message: "Backend is alive!" });
+});
 
 // Subscriber count endpoint
 app.get("/count", (req, res) => {

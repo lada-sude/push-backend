@@ -1,50 +1,28 @@
 const express = require("express");
 const bodyParser = require("body-parser");
-const fetch = require("node-fetch");
 const cors = require("cors");
-const pushTokens = new Set();
+const fetch = require("node-fetch");
+
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-let subscribers = []; // ⚠️ In-memory for now; resets on server restart
+// 🔔 In-memory storage (resets on restart — OK for now)
+const subscribers = new Set();
 
-// Subscribe endpoint
-app.post("/subscribe", (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).send("No token provided");
-
-  if (!subscribers.includes(token)) subscribers.push(token);
-  res.send({ success: true, subscribers });
-});
-
-// Send notification endpoint
-app.post("/notify", async (req, res) => {
-  const { title, body } = req.body;
-  if (!title || !body) return res.status(400).send("Missing title/body");
-
-  const messages = subscribers.map((t) => ({
-    to: t,
-    sound: "default",
-    title,
-    body,
-  }));
-
-  const results = [];
-  for (let msg of messages) {
-    const r = await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(msg),
-    });
-    results.push(await r.json());
-  }
-
-  res.send({ success: true, results });
-});
+/* ===========================
+   HEALTH CHECK
+=========================== */
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", message: "Backend is alive!" });
+  res.status(200).json({
+    status: "ok",
+    message: "Backend is alive!",
+  });
 });
+
+/* ===========================
+   REGISTER PUSH TOKEN
+=========================== */
 app.post("/register-token", (req, res) => {
   const { token } = req.body;
 
@@ -52,19 +30,69 @@ app.post("/register-token", (req, res) => {
     return res.status(400).json({ error: "No token provided" });
   }
 
-  pushTokens.add(token);
-  console.log("Registered token:", token);
+  subscribers.add(token);
+  console.log("📲 Registered token:", token);
 
   res.json({
     success: true,
-    totalTokens: pushTokens.size,
+    totalTokens: subscribers.size,
   });
 });
 
-// Subscriber count endpoint
-app.get("/count", (req, res) => {
-  res.send({ count: subscribers.length });
+/* ===========================
+   SEND NOTIFICATION
+=========================== */
+app.post("/send-notification", async (req, res) => {
+  const { title, body } = req.body;
+
+  if (!title || !body) {
+    return res.status(400).json({
+      error: "title and body are required",
+    });
+  }
+
+  const messages = [...subscribers].map((token) => ({
+    to: token,
+    sound: "default",
+    title,
+    body,
+  }));
+
+  try {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(messages),
+    });
+
+    const data = await response.json();
+    console.log("📤 Expo response:", data);
+
+    res.json({
+      success: true,
+      sent: messages.length,
+    });
+  } catch (err) {
+    console.error("❌ Push error:", err);
+    res.status(500).json({
+      error: "Failed to send notification",
+    });
+  }
 });
 
+/* ===========================
+   SUBSCRIBER COUNT
+=========================== */
+app.get("/count", (req, res) => {
+  res.json({ count: subscribers.size });
+});
+
+/* ===========================
+   START SERVER
+=========================== */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);

@@ -1,7 +1,10 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const fetch = require("node-fetch");
+
+// ✅ ESM-compatible fetch for node-fetch v3
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 app.use(cors());
@@ -51,6 +54,12 @@ app.post("/send-notification", async (req, res) => {
     });
   }
 
+  if (subscribers.size === 0) {
+    return res.status(400).json({
+      error: "No subscribers registered",
+    });
+  }
+
   const messages = [...subscribers].map((token) => ({
     to: token,
     sound: "default",
@@ -73,6 +82,7 @@ app.post("/send-notification", async (req, res) => {
     res.json({
       success: true,
       sent: messages.length,
+      expoResponse: data,
     });
   } catch (err) {
     console.error("❌ Push error:", err);

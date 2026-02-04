@@ -43,21 +43,17 @@ app.post("/register-token", (req, res) => {
 });
 
 /* ===========================
-   SEND NOTIFICATION
+   SEND NOTIFICATION TO ALL
 =========================== */
 app.post("/send-notification", async (req, res) => {
   const { title, body } = req.body;
 
   if (!title || !body) {
-    return res.status(400).json({
-      error: "title and body are required",
-    });
+    return res.status(400).json({ error: "title and body are required" });
   }
 
   if (subscribers.size === 0) {
-    return res.status(400).json({
-      error: "No subscribers registered",
-    });
+    return res.status(400).json({ error: "No subscribers registered" });
   }
 
   const messages = [...subscribers].map((token) => ({
@@ -70,25 +66,51 @@ app.post("/send-notification", async (req, res) => {
   try {
     const response = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(messages),
     });
 
     const data = await response.json();
     console.log("📤 Expo response:", data);
 
-    res.json({
-      success: true,
-      sent: messages.length,
-      expoResponse: data,
-    });
+    res.json({ success: true, sent: messages.length, expoResponse: data });
   } catch (err) {
     console.error("❌ Push error:", err);
-    res.status(500).json({
-      error: "Failed to send notification",
+    res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
+/* ===========================
+   SEND NOTIFICATION TO SINGLE USER
+=========================== */
+app.post("/notify-user", async (req, res) => {
+  const { token, title, body } = req.body;
+
+  if (!token || !title || !body) {
+    return res.status(400).json({ error: "token, title, and body are required" });
+  }
+
+  const message = {
+    to: token,
+    sound: "default",
+    title,
+    body,
+  };
+
+  try {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(message),
     });
+
+    const data = await response.json();
+    console.log("📤 Expo single-user response:", data);
+
+    res.json({ success: true, expoResponse: data });
+  } catch (err) {
+    console.error("❌ Single-user push error:", err);
+    res.status(500).json({ error: "Failed to send notification" });
   }
 });
 
@@ -103,6 +125,4 @@ app.get("/count", (req, res) => {
    START SERVER
 =========================== */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

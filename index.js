@@ -1,7 +1,7 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-
+const admin = require("firebase-admin");
 // ✅ ESM-compatible fetch for node-fetch v3
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -9,6 +9,13 @@ const fetch = (...args) =>
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+
+// 🔥 Firebase Admin
+admin.initializeApp({
+  credential: admin.credential.applicationDefault(),
+});
+
+const firestore = admin.firestore();
 
 // 🔔 In-memory storage (resets on restart — OK for now)
 const subscribers = new Set();
@@ -111,6 +118,60 @@ app.post("/notify-user", async (req, res) => {
   } catch (err) {
     console.error("❌ Single-user push error:", err);
     res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
+/* ===========================
+   NOTIFY ADMINS
+=========================== */
+app.post("/notify-admins", async (req, res) => {
+  const { title, body } = req.body;
+
+  if (!title || !body) {
+    return res.status(400).json({ error: "title and body are required" });
+  }
+
+  try {
+    const snapshot = await firestore
+      .collection("users")
+      .where("role", "==", "admin")
+      .get();
+
+    if (snapshot.empty) {
+      return res.json({ success: true, message: "No admins found" });
+    }
+
+    const messages = [];
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.expoPushToken) {
+        messages.push({
+          to: data.expoPushToken,
+          sound: "default",
+          title,
+          body,
+        });
+      }
+    });
+
+    if (messages.length === 0) {
+      return res.json({ success: true, message: "No admin tokens available" });
+    }
+
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(messages),
+    });
+
+    const result = await response.json();
+    console.log("📤 Admin notification response:", result);
+
+    res.json({ success: true, sent: messages.length });
+  } catch (err) {
+    console.error("❌ Admin notify error:", err);
+    res.status(500).json({ error: "Failed to notify admins" });
   }
 });
 

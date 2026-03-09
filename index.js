@@ -28,8 +28,42 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// 🔔 In-memory push registry (OK for now)
+// 🔔 In-memory cache + persistent storage for push tokens
 const subscribers = new Set();
+const PUSH_SUBSCRIBERS_COLLECTION = "push_subscribers";
+
+function normalizeToken(rawToken) {
+  return typeof rawToken === "string" ? rawToken.trim() : "";
+}
+
+function isExpoPushToken(token) {
+  return (
+    token.startsWith("ExpoPushToken[") || token.startsWith("ExponentPushToken[")
+  );
+}
+
+function tokenToDocId(token) {
+  return Buffer.from(token)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+async function getAllRegisteredTokens() {
+  const tokens = new Set([...subscribers]);
+
+  const snap = await firestore.collection(PUSH_SUBSCRIBERS_COLLECTION).get();
+  snap.forEach((entry) => {
+    const token = normalizeToken(entry.data()?.token);
+    if (token && isExpoPushToken(token)) {
+      tokens.add(token);
+      subscribers.add(token);
+    }
+  });
+
+  return tokens;
+}
 
 /* =========================
    HEALTH CHECK
@@ -41,13 +75,31 @@ app.get("/health", (req, res) => {
 /* =========================
    REGISTER PUSH TOKEN
 ========================= */
-app.post("/register-token", (req, res) => {
-  const { token } = req.body;
+app.post("/register-token", async (req, res) => {
+  const token = normalizeToken(req.body?.token);
   if (!token) return res.status(400).json({ error: "No token provided" });
+  if (!isExpoPushToken(token)) {
+    return res.status(400).json({ error: "Invalid Expo push token format" });
+  }
 
   subscribers.add(token);
-  console.log("📲 Registered token:", token);
 
+  try {
+    await firestore
+      .collection(PUSH_SUBSCRIBERS_COLLECTION)
+      .doc(tokenToDocId(token))
+      .set(
+        {
+          token,
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true }
+      );
+  } catch (err) {
+    console.error("❌ Failed to persist token:", err);
+  }
+
+  console.log("📲 Registered token:", token);
   res.json({ success: true, totalTokens: subscribers.size });
 });
 
@@ -59,10 +111,15 @@ app.post("/send-notification", async (req, res) => {
   if (!title || !body)
     return res.status(400).json({ error: "title and body are required" });
 
-  if (subscribers.size === 0)
-    return res.status(400).json({ error: "No subscribers registered" });
+  const registeredTokens = await getAllRegisteredTokens();
+  if (registeredTokens.size === 0) {
+    return res.status(400).json({
+      error:
+        "No subscribers registered. Open the app once to register push token.",
+    });
+  }
 
-  const messages = [...subscribers].map((token) => ({
+  const messages = [...registeredTokens].map((token) => ({
     to: token,
     sound: "default",
     title,
@@ -233,8 +290,14 @@ checkExpirations();
 /* =========================
    SUBSCRIBER COUNT
 ========================= */
-app.get("/count", (req, res) => {
-  res.json({ count: subscribers.size });
+app.get("/count", async (req, res) => {
+  try {
+    const registeredTokens = await getAllRegisteredTokens();
+    res.json({ count: registeredTokens.size });
+  } catch (err) {
+    console.error("❌ Failed to count subscribers:", err);
+    res.status(500).json({ error: "Failed to count subscribers" });
+  }
 });
 
 /* =========================

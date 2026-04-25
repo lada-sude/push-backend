@@ -20,6 +20,7 @@ if (!admin.apps.length) {
 
 const firestore = admin.firestore();
 const { Timestamp } = admin.firestore;
+const ONE_YEAR_IN_MS = 365 * 24 * 60 * 60 * 1000;
 
 /* =========================
    EXPRESS SETUP
@@ -230,7 +231,29 @@ async function checkExpirations() {
 
     for (const docSnap of snapshot.docs) {
       const data = docSnap.data();
-      if (!data.expiresAt || !data.userId) continue;
+      if (!data.userId) continue;
+
+      if (data.activatedAt && typeof data.activatedAt.toMillis === "function") {
+        const minimumExpiresAt = Timestamp.fromMillis(
+          data.activatedAt.toMillis() + ONE_YEAR_IN_MS
+        );
+
+        if (!data.expiresAt || data.expiresAt.toMillis() < minimumExpiresAt.toMillis()) {
+          await firestore
+            .collection("user_payments")
+            .doc(docSnap.id)
+            .update({ expiresAt: minimumExpiresAt });
+
+          await firestore
+            .collection("users")
+            .doc(data.userId)
+            .set({ subscriptionExpiresAt: minimumExpiresAt }, { merge: true });
+
+          data.expiresAt = minimumExpiresAt;
+        }
+      }
+
+      if (!data.expiresAt) continue;
 
       if (data.expiresAt.toMillis() <= now.toMillis()) {
         // 1️⃣ mark payment expired
